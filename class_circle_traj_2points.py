@@ -117,29 +117,39 @@ class Collinear_to_traj:
 
         return dist_pt1_contact1, dist_pt1_contact2, dist_pt2_contact1, dist_pt2_contact2, dist_pt3_contact3, dist_pt3_contact4, dist_pt4_contact3, dist_pt4_contact4
         
-        
+            
     def trajz_to_t(self, t, pt, r1, r2, a):
-        # Calculate midpoint between r1 and r2
+        # Calculate midpoint and vector of the major axis
         midpoint = (r1 + r2) / 2
+        major_vector = r2 - r1
 
-        # Axis of rotation is normalized vector from pt to midpoint
-        axis = midpoint - pt
-        axis = axis / np.linalg.norm(axis)
+        # Major and minor axes lengths
+        major_axis_length = np.linalg.norm(major_vector) / 2
+        minor_axis_length = major_axis_length / 2.5
 
-        # Calculate rotation angles in radians
-        theta_r1 = 2 * np.pi * t
-        theta_r2 = theta_r1 + 2*np.pi  # 180 degrees phase shift
+        # Normalize major axis vector
+        major_vector_normalized = major_vector / np.linalg.norm(major_vector)
 
-        # Calculate rotation matrices for r1 and r2
-        R_r1 = self.rotation_matrix(axis, a*theta_r1)
-        R_r2 = self.rotation_matrix(axis, a*theta_r2)
+        # Minor axis is along the z-axis
+        minor_vector = np.array([0, 0, 1])
 
-        # Rotate points
-        r1_rotated = np.dot(R_r1, r1 - midpoint) + midpoint
-        r2_rotated = np.dot(R_r2, r2 - midpoint) + midpoint
+        # Compute rotation angle for ellipse
+        theta = 2 * np.pi * t
+
+        direction = np.sign(a)
+
+        # Calculate positions on the ellipse
+        r2_rotated = midpoint + major_axis_length * np.cos(direction * theta) * major_vector_normalized + \
+                    minor_axis_length * np.sin(direction * theta) * minor_vector
+        r1_rotated = midpoint - major_axis_length * np.cos(direction * theta) * major_vector_normalized - \
+                    minor_axis_length * np.sin(direction * theta) * minor_vector
+
+
+        # Ensure the z-component is non-negative (optional based on your use case)
+        r1_rotated[2] = max(r1_rotated[2], 0.1)
+        r2_rotated[2] = max(r2_rotated[2], 0.1)
 
         return r1_rotated, r2_rotated
-
 
     def rotation_matrix(self, axis, theta):
         """
