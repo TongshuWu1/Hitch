@@ -2,6 +2,7 @@ import time
 import numpy as np
 from pycrazyswarm import *
 from class_circle_traj_2points import Collinear_to_traj
+from class_catenary_trajectory import CatenaryTrajectory
 import sys
 import os
 
@@ -30,6 +31,16 @@ Rotation_num = 1
 ellipsoid_radii = [0.12, 0.12, 0.12]
 duration_per_layer = 30  # Duration for each layer in seconds
 initial_position_duration = 10  # Duration to move to initial positions
+
+'''
+    movement function:
+            1. move_smoothly_simultaneously to to move multiple robot
+        at once in given start_positions and end_positions
+
+            2. move_circularly to move multiple robot at once in circular
+        motion with center in object point
+
+'''
 
 def move_smoothly_simultaneously(swarm, allcfs, start_positions, end_positions, duration, timeHelper, object_pt):
     steps = int(duration * 100)  # 100 steps per second
@@ -81,6 +92,10 @@ def move_circularly(swarm, allcfs, start_positions, end_positions, duration, tim
         timeHelper.sleep(0.01)  # Short delay for smoother simulation
 
 
+'''
+    natnet to get object position from optitrack
+'''
+
 def receive_rigid_body_frame(id, position, rotation_quaternion):
     global objects, object_rotations
     objects[id] = position
@@ -105,18 +120,30 @@ def get_object_position(id):
 
 
 def main():
-    
     setup_optitrack_client()  # Start the client to begin receiving data
 
+
+    '''
+        Variable initialization
+    '''
     swarm = Crazyswarm()
     timeHelper = swarm.timeHelper
     allcfs = swarm.allcfs
-    currentLayer = 1
     currentRopeLength = ropeLength
+    currentLayer = 1
+
     target_object_id = 497  # ID of the object you want to track
     slack_shift = 0.06 # Value shifter for slack
 
+    shrink_distance = 0.0005  # distance shrink during the rotation for cicular trajctory within layers
+    object_r = 0.25
 
+
+
+    '''
+        1. Getting position of the object and deine hitch point
+        2. Enable Collision Avoidance an take off
+    '''
     position, rotation = get_object_position(target_object_id)
     if position and rotation:
         print(f"Position of object {target_object_id}:", position, "Rotation:", rotation)
@@ -125,7 +152,7 @@ def main():
     else:
         print("no data from object")
         return
-    object_r = 0.25
+   
 
     print(f"target height = {object_pt[2]}")
 
@@ -150,18 +177,17 @@ def main():
     timeHelper.sleep(5)  # Ensure that takeoff completes
 
     start_time = timeHelper.time()
-    
-    while currentLayer <= desireLayer and swarm.input.checkIfAnyButtonIsPressed() == None:
 
-        if swarm.input.checkIfAnyButtonIsPressed():
-            print("emergency land")
-            allcfs.land(targetHeight=0.01, duration=6)
-            timeHelper.sleep(6)
-            break
+
+
+    '''
+        1. big while loop to each layer
+        2. calculate initial position for four robot
+    '''    
+    while currentLayer <= desireLayer and swarm.input.checkIfAnyButtonIsPressed() == None:
         # Create Collinear_to_traj object and calculate initial positions
         CT = Collinear_to_traj([pt1, pt2, pt3, pt4], object_pt, object_r, currentRopeLength, currentLayer)
-        s1, s2, s3, s4 = CT.calculate_rope_distances(currentLayer, currentRopeLength)
-
+        s1, s2, s3, s4 = CT.calculate_rope_distances(currentLayer, currentRopeLength) 
         if currentLayer % 2 == 1:
             init1, init2, init3, init4 = CT.calculate_four_robot_position(pt1, pt2, s1, s2, s3, s4)
         else:
@@ -182,13 +208,19 @@ def main():
         init2_rep = init2
         init3_rep = init3
         init4_rep = init4
+
+        '''
+            trajectory calculation and xcution for current layer
+        '''
+
+
         while True:
             current_time = timeHelper.time() - layer_start_time
             if current_time >= duration_per_layer:
                 t = Rotation_num  # Normalize to ensure it reaches exactly the intended rotation number
             else:
                 t = (current_time / duration_per_layer) * Rotation_num
-            shrink_distance = 0.0005  # Change this to the desired distance
+
 
 
             if currentLayer % 2 == 1:
@@ -239,46 +271,40 @@ def main():
             unit_vector_init2_to_pt1 = (pt1 - init2) / np.linalg.norm(pt1 - init2)
 
             
+
+        '''
+            increase tension and move lift up the object
+        '''
+
+
         ##lisftup
         if currentLayer == desireLayer:
 
             print("move away from object point")
+            displacement_distance = 0.03  # Adjust this value as needed
 
             
             # Retrieve current positions of all Crazyflies
             current_positions = [np.array(cf.position()) for cf in allcfs.crazyflies]
-            
-            # Set the displacement distance away from the object point
-            displacement_distance = 0.03  # Adjust this value as needed
-            
-            # Calculate the displacement vectors to move away from the object point
             displacement_vectors = [
                 (pos - object_pt) / np.linalg.norm(pos - object_pt) * displacement_distance
                 for pos in current_positions
             ]
-            
-            # Calculate positions after moving away from the object point
             away_positions = [
                 current_positions[i] + displacement_vectors[i] 
                 for i in range(len(current_positions))
             ]
-            
-            # Move Crazyflies smoothly to the positions away from the object point
             move_smoothly_simultaneously(swarm, allcfs, current_positions, away_positions, 10, timeHelper, object_pt)
-            
-            
-            print("lift up")
 
-            # Set the desired lift height
-            liftupHeight = 0.8
             
-            # Calculate new positions for lifting up
+            # lift up
+            print("lift up")    
+
+            liftupHeight = 0.8 # Set desire lift up height
             end_positions = [
                 pos + np.array([0.0, 0.0, liftupHeight]) 
                 for pos in away_positions
             ]
-            
-            # Move Crazyflies smoothly to the new elevated positions
             move_smoothly_simultaneously(swarm, allcfs, away_positions, end_positions, 10, timeHelper, object_pt)
             
             allcfs.land(targetHeight=0.01, duration=10)
